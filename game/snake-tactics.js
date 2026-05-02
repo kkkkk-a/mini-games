@@ -43,9 +43,12 @@ if (mode === 'local') {
 
         this.reset();
         this.isPlaying = true;
-        this.loop();
+        
+        // オンラインゲストの場合、ホストからの 'start' 受信時にループ開始するためここでは呼ばない
+        if (this.mode !== 'online-guest') {
+            this.loop();
+        }
     },
-
     reset() {
         this.p1.body = [{x:5, y:18}, {x:5, y:19}, {x:5, y:20}];
         this.p1.dir = {x:0, y:-1}; this.p1.nextDir = {x:0, y:-1};
@@ -165,10 +168,37 @@ if (mode === 'local') {
 
     aiMove(p) {
         const head = p.body[0];
-        if (this.food.x > head.x && p.dir.x !== -1) p.nextDir = {x:1, y:0};
-        else if (this.food.x < head.x && p.dir.x !== 1) p.nextDir = {x:-1, y:0};
-        else if (this.food.y > head.y && p.dir.y !== -1) p.nextDir = {x:0, y:1};
-        else if (this.food.y < head.y && p.dir.y !== 1) p.nextDir = {x:0, y:-1};
+        
+        // 第一候補: エサに向かう
+        let targetDir = p.dir;
+        if (this.food.x > head.x && p.dir.x !== -1) targetDir = {x:1, y:0};
+        else if (this.food.x < head.x && p.dir.x !== 1) targetDir = {x:-1, y:0};
+        else if (this.food.y > head.y && p.dir.y !== -1) targetDir = {x:0, y:1};
+        else if (this.food.y < head.y && p.dir.y !== 1) targetDir = {x:0, y:-1};
+        
+        p.nextDir = targetDir;
+
+        // ★修正: 進んだ先が死ぬ場合（壁か体）、別の方向に逃げる（簡易回避AI）
+        const nextX = head.x + p.nextDir.x;
+        const nextY = head.y + p.nextDir.y;
+        
+        // 危険判定ヘルパー
+        const isDanger = (x, y) => {
+            if (x < 0 || x >= this.tileCount || y < 0 || y >= this.tileCount) return true;
+            const hit = (body) => body.some(seg => seg.x === x && seg.y === y);
+            return hit(this.p1.body) || hit(this.p2.body);
+        };
+
+        if (isDanger(nextX, nextY)) {
+            // 4方向の中で安全なものを探す
+            const safeDirs =[
+                {x:1, y:0}, {x:-1, y:0}, {x:0, y:1}, {x:0, y:-1}
+            ].filter(d => !isDanger(head.x + d.x, head.y + d.y) && (d.x !== -p.dir.x || d.y !== -p.dir.y));
+            
+            if (safeDirs.length > 0) {
+                p.nextDir = safeDirs[Math.floor(Math.random() * safeDirs.length)];
+            }
+        }
     },
 
     placeFood() {
