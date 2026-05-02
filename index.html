@@ -4,7 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>ミニゲーム集</title>
-    
+    <!-- PWA設定 -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#00f2ff">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Neo Tactics">
     <!-- 外部ライブラリ (安定版) -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -221,8 +226,7 @@ closeHelp() {
     document.getElementById('screen-setup').style.display = 'flex';
 },
 
-        // ゲーム開始
-        start(mode) {
+start(mode) {
             this.currentMode = mode;
             Shared.Sound.init();
             
@@ -234,21 +238,27 @@ closeHelp() {
             
             if (!game) return alert("Game not found");
 
-            // UIリセット
+            // UIリセット（全体クリーニング）
             document.querySelectorAll('.touch-group').forEach(e => e.classList.remove('active'));
             document.getElementById('ui-calc').classList.remove('active');
+            document.getElementById('game-timer').style.display = 'none';
+            document.getElementById('turn-display-area').style.display = 'none';
+            document.getElementById('game-guide').style.display = 'none';
             
             // 既存の終了処理を呼んでおく（念のため）
             if(game.stop) game.stop();
 
+            // ★キャンバスの再生成 (WebGLと2Dコンテキストの競合防止)
+            const container = document.getElementById('game-container');
+            const oldCvs = document.getElementById('main-cvs');
+            if (oldCvs) oldCvs.remove();
+            const newCvs = document.createElement('canvas');
+            newCvs.id = 'main-cvs';
+            // EXITボタンなどの裏（一番奥）へ配置
+            container.insertBefore(newCvs, container.firstChild);
+
             // モードに応じて初期化
-            if (mode === 'npc' || mode === 'local') {
-                game.init(mode);
-            } else if (mode === 'online-host') {
-                game.init('online-host');
-            } else if (mode === 'online-guest') {
-                game.init('online-guest');
-            }
+            game.init(mode);
         },
 
         // ゲーム中断・終了処理 (Back / Menuボタン用)
@@ -264,6 +274,13 @@ closeHelp() {
                 game.stop();
             }
 
+            // 共通UIの強制リセット
+            document.querySelectorAll('.touch-group').forEach(e => e.classList.remove('active'));
+            document.getElementById('ui-calc').classList.remove('active');
+            document.getElementById('game-timer').style.display = 'none';
+            document.getElementById('turn-display-area').style.display = 'none';
+            document.getElementById('game-guide').style.display = 'none';
+
             // 通信切断
             if (Shared.Net.conn) {
                 Shared.Net.conn.close();
@@ -273,7 +290,11 @@ closeHelp() {
             // モード選択画面に戻る (タイトルではなくセットアップ画面)
             Shared.UI.show('screen-setup');
         },
-
+        // ネットワーク接続確立時のコールバック（システム共通）
+        onNetConnect() {
+            // ホスト・ゲストのロールに合わせてゲーム開始
+            this.start(Shared.Net.role === 'host' ? 'online-host' : 'online-guest');
+        },
         // リトライ処理
         retry() {
             // 現在のゲームを停止
@@ -290,6 +311,18 @@ closeHelp() {
             }
         }
     };
+
+    // システム共通のネットワーク接続完了コールバックを登録
+    Shared.Net.onConnect = () => Core.onNetConnect();
+
+    // PWA (Service Worker) の登録
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js')
+                .then(reg => console.log('SW registered!', reg))
+                .catch(err => console.error('SW register failed', err));
+        });
+    }
     </script>
 </body>
 </html>
