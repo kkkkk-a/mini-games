@@ -263,6 +263,14 @@ canvas {
 }
 .calc-panel.active { transform: translateY(0); }
 
+/* P2用反転モード */
+.calc-panel.p2-mode {
+    bottom: auto; top: 0;
+    border-radius: 0 0 20px 20px;
+    transform: translateY(-110%) rotate(180deg);
+}
+.calc-panel.p2-mode.active { transform: translateY(0) rotate(180deg); }
+
 .calc-disp { background: #eee; font-family: monospace; font-size: 1.8rem; text-align: right; padding: 10px; margin-bottom: 10px; border-radius: 5px; height: 40px; }
 .calc-chips, .calc-hand { display: flex; justify-content: center; gap: 5px; flex-wrap: wrap; margin-bottom: 10px; }
 .calc-btns { display: flex; gap: 10px; margin-top: auto; }
@@ -354,3 +362,37 @@ canvas {
 .active-2p #ui-dpad { bottom: 20px; } /* P1は下 */
 .active-2p #ui-dpad-p2 { display: grid !important; } /* P2は上 */
 .active-2p #ui-smash-p2 { display: flex !important; }
+
+/* --- VFX演出（画面揺れ） --- */
+@keyframes shake-light {
+    0% { transform: translate(0, 0); }
+    20% { transform: translate(-3px, 2px); }
+    40% { transform: translate(3px, -2px); }
+    60% { transform: translate(-3px, -2px); }
+    80% { transform: translate(3px, 2px); }
+    100% { transform: translate(0, 0); }
+}
+@keyframes shake-hard {
+    0% { transform: translate(0, 0) scale(1); }
+    10% { transform: translate(-10px, 8px) scale(1.02); }
+    30% { transform: translate(10px, -8px) scale(1.02); }
+    50% { transform: translate(-10px, -8px) scale(1.02); }
+    70% { transform: translate(10px, 8px) scale(1.02); }
+    90% { transform: translate(-5px, 5px) scale(1); }
+    100% { transform: translate(0, 0) scale(1); }
+}
+.vfx-shake-light { animation: shake-light 0.3s ease-out; }
+.vfx-shake-hard { animation: shake-hard 0.4s ease-out; }
+
+/* --- VFX演出（フラッシュ） --- */
+@keyframes vfx-flash {
+    0% { background-color: rgba(255, 255, 255, 0.9); }
+    100% { background-color: rgba(255, 255, 255, 0); }
+}
+.vfx-flash-overlay {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 9999;
+    animation: vfx-flash 0.15s ease-out forwards;
+}
