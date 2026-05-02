@@ -24,9 +24,10 @@ window.CalcGame = {
         Shared.UI.toggleLayout('ui-calc', false);
 
         const cvs = document.getElementById('main-cvs');
-        const rect = document.getElementById('game-container').getBoundingClientRect();
-        cvs.width = rect.width;
-        cvs.height = rect.height;
+        
+        // 内部解像度を固定
+        cvs.width = 600;
+        cvs.height = 800;
 
         if (mode.includes('online')) {
             Shared.Net.onData = (d) => this.onNet(d);
@@ -37,13 +38,13 @@ window.CalcGame = {
     },
 
     reset() {
-        // ★修正: 手札を [1, 2, 3, 5, 7, 9] に変更
-        const initHand = () => [1, 2, 3, 5, 7, 9]; 
+        const initHand = () =>[1, 2, 3, 5, 7, 9]; 
         
-        this.p1 = { hand: initHand(), chips: ['+', '-', '*', '/'], select: null };
+        this.p1 = { hand: initHand(), chips:['+', '-', '*', '/'], select: null };
         this.p2 = { hand: initHand(), chips: ['+', '-', '*', '/'], select: null };
         
-        this.attacker = (Math.random() > 0.5) ? 'p1' : 'p2';
+        // ★修正: オンライン同期ズレを防ぐため、常にp1からスタート
+        this.attacker = 'p1';
         this.localTurn = 'p1';
         this.updateHUD();
     },
@@ -136,6 +137,12 @@ window.CalcGame = {
         if (this.mode === 'local') {
             currentHand = this[this.localTurn].hand;
             isMyTurn = true;
+            // ローカル対戦時、P2のターンなら手札を上部に逆さまに表示
+            if (this.localTurn === 'p2') {
+                container.style.top = '15%';
+                container.style.bottom = 'auto';
+                container.style.transform = 'rotate(180deg)';
+            }
         } else {
             currentHand = this[this.role].hand;
             isMyTurn = !this[this.role].select;
@@ -237,12 +244,18 @@ window.CalcGame = {
         ctx.fillText(this.p1.select, cvs.width / 2, cvs.height * 0.75);
 
         // 同じ数字なら両者ダメージ
-        if (this.p1.select === this.p2.select) {
+         if (this.p1.select === this.p2.select) {
             Shared.UI.msg("CRASH!!", "#ffd700");
             Shared.Sound.preset('hit');
-            setTimeout(() => this.endRound(true, true), 2000);
+            Shared.VFX.shake('hard'); // ★VFX演出
+            Shared.VFX.flash();       // ★VFX演出
+            setTimeout(() => {
+                if (!this.isPlaying) return; // ★中断時対策
+                this.endRound(true, true);
+            }, 2000);
         } else {
             setTimeout(() => {
+                if (!this.isPlaying) return; // ★中断時対策
                 this.startCalcPhase(this.attacker);
             }, 1500);
         }
@@ -266,6 +279,14 @@ window.CalcGame = {
             this.buffer = [baseCard]; 
             document.getElementById('calc-target').innerText = target;
             
+            // ローカル対戦でP2が攻撃側の場合はパネルを反転
+            const panel = document.getElementById('ui-calc');
+            if (this.mode === 'local' && atk === 'p2') {
+                panel.classList.add('p2-mode');
+            } else {
+                panel.classList.remove('p2-mode');
+            }
+            
             Shared.UI.toggleLayout('ui-calc', true); 
             Shared.UI.msg(this.mode==='local' ? `${atk.toUpperCase()}の計算` : "計算して相手の数字を作れ！");
             
@@ -273,14 +294,14 @@ window.CalcGame = {
             this.startTimer(40, () => this.pass()); 
 
         } else if (this.mode === 'npc' && atk === 'p2') {
-            Shared.UI.msg("相手が計算中...", "#ff5555");
+            Shared.UI.msg("CPUが計算中...", "#ff5555");
             setTimeout(() => {
+                if (!this.isPlaying) return; // ★中断時対策
                 // NPCロジック (成功率50%)
                 const success = Math.random() < 0.5;
                 if(success) {
                     Shared.UI.msg("BREAK SUCCESS!", "#ffd700");
-                    Shared.Sound.preset('win');
-                    // 成功時: 被害者(P1)はカードを失う、攻撃者(P2/NPC)は場+コストを失う
+                    Shared.Sound.preset('dead'); // P1視点ではダメージ音
                     this.endRound(true, true); 
                 } else {
                     Shared.UI.msg("GUARDED!", "#aaa");
@@ -356,9 +377,11 @@ window.CalcGame = {
             const result = Function('"use strict";return (' + exp + ')')();
             const target = (this.attacker === 'p1') ? this.p2.select : this.p1.select;
             
-            if (result === target) {
+             if (result === target) {
                 Shared.Sound.preset('win');
                 Shared.UI.msg("BREAK SUCCESS!!", "#ffd700");
+                Shared.VFX.shake('light'); // ★VFX演出
+                Shared.VFX.flash();        // ★VFX演出
                 if (this.mode.includes('online')) Shared.Net.send('result', {success: true, buffer: this.buffer});
                 // 成功: 相手は場のカード喪失、自分は場のカード＋計算コスト喪失
                 this.endRound(true, true);
@@ -415,19 +438,26 @@ window.CalcGame = {
         this.attacker = this.attacker === 'p1' ? 'p2' : 'p1';
         
         // 次のターンへ
-        setTimeout(() => this.startSelectPhase(), 2000);
+        setTimeout(() => {
+            if (this.isPlaying) this.startSelectPhase();
+        }, 2000);
     },
 
     // コスト支払い（バッファに含まれるカードを手札から消す）
     payCost(pl) {
-        // bufferの1要素目（場のカード）以外を確認
+        // spliceによる配列破壊を避け、新しい手札配列を生成する安全な方法
+        let currentHand = [...this[pl].hand];
+        
         for(let i=1; i<this.buffer.length; i++) {
             const val = this.buffer[i];
             if (typeof val === 'number') {
-                const idx = this[pl].hand.indexOf(val);
-                if (idx > -1) this[pl].hand.splice(idx, 1);
+                const idx = currentHand.indexOf(val);
+                if (idx > -1) {
+                    currentHand.splice(idx, 1);
+                }
             }
         }
+        this[pl].hand = currentHand;
     },
 
     updateHUD() {
