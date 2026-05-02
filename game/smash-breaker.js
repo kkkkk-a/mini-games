@@ -35,7 +35,8 @@ if (mode === 'local') {
             'ShiftRight':'chg', 'Space':'chg',
             'rotL':'rotL', 'rotR':'rotR', 'charge':'chg',
             // P2用
-            'KeyA':'L2', 'KeyD':'R2', 'KeyW':'rotL2', 'KeyS':'rotR2', 'ShiftLeft':'chg2'
+            'KeyA':'L2', 'KeyD':'R2', 'KeyW':'rotL2', 'KeyS':'rotR2', 'ShiftLeft':'chg2',
+            'rotL2':'rotL2', 'rotR2':'rotR2', 'charge2':'chg2'
         });
 
         if (mode.includes('online')) Shared.Net.onData = (d) => this.onNet(d);
@@ -54,22 +55,36 @@ if (mode === 'local') {
 
     loop() {
         if(!this.isPlaying) return;
-        this.update();
+        
+        // ヒットストップ中なら物理演算(update)をスキップし、描画だけ行う
+        if (!Shared.VFX.isStopped()) {
+            this.update();
+        }
         this.draw();
+        
         requestAnimationFrame(() => this.loop());
     },
 
     update() {
         const s = Shared.Input.state;
         
+        // マルチタッチスワイプの振り分け
+        let tx1 = null, tx2 = null;
+        if (s.activeTouches) {
+            s.activeTouches.forEach(t => {
+                // 画面中心(y=400)を境にP1とP2のタッチを分離
+                if (t.y > 400) tx1 = t.x;
+                else tx2 = t.x;
+            });
+        }
+        
         // P1操作
-        this.updatePaddle(this.p1, s.L, s.R, s.rotL, s.rotR, s.chg, s.touchX);
+        this.updatePaddle(this.p1, s.L, s.R, s.rotL, s.rotR, s.chg, tx1);
         
         // P2操作
         if(this.mode==='local') {
-            // ★修正: P2のローカル操作を実装
             // P2は画面上部なので左右反転はさせない（画面の見た目通りに動かす）
-            this.updatePaddle(this.p2, s.L2, s.R2, s.rotR2, s.rotL2, s.chg2, null); 
+            this.updatePaddle(this.p2, s.L2, s.R2, s.rotR2, s.rotL2, s.chg2, tx2); 
             // 注意: rotR2とrotL2を入れ替えているのは、P2が逆さま配置のため、
             // 「Wキー(rotL2)」で見た目上の左（システム上の右回転）に傾けるため
         } else if(this.mode==='npc') {
@@ -89,9 +104,19 @@ if (mode === 'local') {
              }
         }
 
-        if(this.mode.includes('online')) {
-            const my = this.role==='p1' ? this.p1 : this.p2;
+        // ★修正: オンライン時の対戦相手の動きを滑らかに補間 (Interpolation)
+        if (this.mode.includes('online')) {
+            const my = this.role === 'p1' ? this.p1 : this.p2;
+            const opp = this.role === 'p1' ? this.p2 : this.p1;
+            
+            // 自分の入力は送信
             Shared.Net.send('input', { x:my.x, a:my.angle, c:my.charge, k:my.kick });
+
+            // 相手の動きは受信した目標値（targetX）に向かって滑らかに近づける
+            if (opp.targetX !== undefined) {
+                opp.x += (opp.targetX - opp.x) * 0.3;
+                opp.angle += (opp.targetAngle - opp.angle) * 0.3;
+            }
         }
 
         if(this.mode!=='online-guest') {
@@ -173,6 +198,11 @@ if (mode === 'local') {
                 b.vx += lx * 0.15;
                 this.spawnParticles(b.x, b.y, 20, '#ffd700');
                 Shared.Sound.preset('dead');
+                
+                // ★VFX: 強打時に画面を激しく揺らし、0.15秒時間を止め、フラッシュさせる
+                Shared.VFX.shake('hard');
+                Shared.VFX.flash();
+                Shared.VFX.hitStop(150); 
             } else {
                 b.power = false;
                 b.vy = Math.abs(b.vy) * forwardDir;
@@ -235,8 +265,11 @@ if (mode === 'local') {
     onNet(d) {
         if(d.type==='input') {
             const opp = this.role==='p1'?this.p2:this.p1;
-            opp.x=d.payload.x; opp.angle=d.payload.a; 
-            opp.charge=d.payload.c; opp.kick=d.payload.k;
+            // ★修正: 直接上書きせず、目標値としてセットする
+            opp.targetX = d.payload.x; 
+            opp.targetAngle = d.payload.a; 
+            opp.charge = d.payload.c; 
+            opp.kick = d.payload.k;
         }
         if(d.type==='sync') this.ball = d.payload.b;
         if(d.type==='over') this.end(d.payload);
