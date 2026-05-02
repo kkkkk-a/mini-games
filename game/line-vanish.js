@@ -18,9 +18,10 @@ window.LineGame = {
         
         this.canvas = document.getElementById('main-cvs');
         this.ctx = this.canvas.getContext('2d');
-        const rect = document.getElementById('game-container').getBoundingClientRect();
-        this.canvas.width = rect.width;
-        this.canvas.height = rect.height;
+        
+        // 内部解像度を固定（表示サイズはCSSの 100% 指定により自動で追従します）
+        this.canvas.width = 600;
+        this.canvas.height = 600;
         
         this.reset();
         this.draw();
@@ -103,12 +104,14 @@ window.LineGame = {
         this.moves[p].push(idx);
         Shared.Sound.preset('place');
         
-        const damage = this.countWinLines(p);
+         const damage = this.countWinLines(p);
         if(damage > 0) {
             const opp = p==='p1'?'p2':'p1';
             this.hp[opp] -= damage;
             Shared.Sound.preset('hit');
             Shared.UI.msg(damage > 1 ? "DOUBLE ATTACK!!" : "ATTACK!", "#ff0");
+            Shared.VFX.shake(damage > 1 ? 'hard' : 'light'); // ★VFX演出
+            if (damage > 1) Shared.VFX.flash();              // ★VFX演出
         }
 
         this.updateHUD();
@@ -143,13 +146,18 @@ updateStatus() {
     h1.classList.remove('active-turn-p1');
     h2.classList.remove('active-turn-p2');
 
+    // ★修正: モードに応じて名前を変える
+    let p1Name = "P1"; let p2Name = "P2";
+    if (this.mode === 'npc') { p1Name = "YOU"; p2Name = "CPU"; }
+    else if (this.mode.includes('online')) { p1Name = this.role==='p1'?"YOU":"ENEMY"; p2Name = this.role==='p2'?"YOU":"ENEMY"; }
+
     if (this.turn === 'p1') {
         h1.classList.add('active-turn-p1');
-        hc.innerText = "P1 TURN";
+        hc.innerText = `${p1Name} TURN`;
         hc.style.color = "var(--primary)";
     } else {
         h2.classList.add('active-turn-p2');
-        hc.innerText = "P2 TURN";
+        hc.innerText = `${p2Name} TURN`;
         hc.style.color = "var(--accent)";
     }
 },
