@@ -3,6 +3,13 @@
  * 役割: 全ゲーム共通の「音・入力・通信・画面遷移」を一括管理するエンジン
  */
 
+// --- ブラウザ特有のジェスチャー（引っ張って更新、スワイプ戻る）を無効化 ---
+document.addEventListener('touchmove', function(e) {
+    // ヘルプ画面など、意図的にスクロールさせたい場所は許可
+    if (e.target.closest('#help-content')) return;
+    e.preventDefault();
+}, { passive: false });
+
 window.Shared = {
         stop() {
         this.isPlaying = false;
@@ -79,6 +86,50 @@ window.Shared = {
                 // 1.5秒後に消す
                 setTimeout(() => { el.style.display = 'none'; }, 1500);
             }
+        }
+    },
+
+    VFX: {
+        stopUntil: 0,
+        
+        // 画面揺れ (light / hard)
+        shake(intensity = 'light') {
+            const el = document.getElementById('game-container');
+            if (!el) return;
+            const className = 'vfx-shake-' + intensity;
+            
+            // アニメーションを再トリガーするためのリセット
+            el.classList.remove('vfx-shake-light', 'vfx-shake-hard');
+            void el.offsetWidth; // リフロー強制
+            
+            el.classList.add(className);
+            setTimeout(() => el.classList.remove(className), 500);
+        },
+
+        // ヒットストップ (指定ミリ秒だけゲームの物理演算を止める)
+        hitStop(ms) {
+            this.stopUntil = performance.now() + ms;
+        },
+
+        // 現在ヒットストップ中かどうか
+        isStopped() {
+            return performance.now() < this.stopUntil;
+        },
+
+        // フラッシュ (画面一閃)
+        flash() {
+            const container = document.getElementById('game-container');
+            if (!container) return;
+            let overlay = document.getElementById('vfx-flash-div');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'vfx-flash-div';
+                container.appendChild(overlay);
+            }
+            // アニメーションのリセット
+            overlay.className = '';
+            void overlay.offsetWidth; 
+            overlay.className = 'vfx-flash-overlay';
         }
     },
 
@@ -195,27 +246,37 @@ window.Shared = {
                 }
             });
 
-            // キャンバスのスワイプ座標取得（Smash Breaker等で使用）
+             // キャンバスのスワイプ座標取得 (マルチタッチ対応)
             const cvs = document.getElementById('main-cvs');
             if (cvs) {
+                this.state.activeTouches = new Map();
+                
                 const updatePos = (e) => {
-                    // タッチ中またはマウスボタン押下中のみ座標を更新
-                    if (e.isPrimary && (e.buttons > 0 || e.pointerType === 'touch')) {
+                    if (e.buttons > 0 || e.pointerType === 'touch') {
                         const rect = cvs.getBoundingClientRect();
-                        // 内部解像度に合わせて座標を正規化
                         const scaleX = cvs.width / rect.width;
                         const scaleY = cvs.height / rect.height;
-                        this.state.touchX = (e.clientX - rect.left) * scaleX;
-                        this.state.touchY = (e.clientY - rect.top) * scaleY;
+                        this.state.activeTouches.set(e.pointerId, {
+                            x: (e.clientX - rect.left) * scaleX,
+                            y: (e.clientY - rect.top) * scaleY
+                        });
                     }
                 };
                 
-                cvs.onpointermove = updatePos;
                 cvs.onpointerdown = (e) => {
                     e.preventDefault(); // スクロール防止
                     Shared.Sound.init();
+                    cvs.setPointerCapture(e.pointerId);
                     updatePos(e);
                 };
+                cvs.onpointermove = (e) => {
+                    if (this.state.activeTouches.has(e.pointerId)) updatePos(e);
+                };
+                const removePos = (e) => {
+                    this.state.activeTouches.delete(e.pointerId);
+                };
+                cvs.onpointerup = removePos;
+                cvs.onpointercancel = removePos;
             }
         }
     },
