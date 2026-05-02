@@ -93,15 +93,12 @@ window.GraphGame = {
 
     setupThree() {
         const cont = document.getElementById('game-container');
-        const oldCvs = document.getElementById('main-cvs');
-        if (oldCvs) oldCvs.remove();
-
-        const cvs = document.createElement('canvas');
-        cvs.id = 'main-cvs';
+        const cvs = document.getElementById('main-cvs');
+        
+        // CSSを適用
         cvs.style.width = '100%'; cvs.style.height = '100%';
         cvs.style.display = 'block'; cvs.style.position = 'absolute';
         cvs.style.top = '0'; cvs.style.left = '0'; cvs.style.zIndex = '1'; 
-        cont.prepend(cvs);
 
         const width = cont.clientWidth;
         const height = cont.clientHeight;
@@ -176,12 +173,15 @@ window.GraphGame = {
     },
 
     autoPlay() {
-        // 時間切れ時の自動選択（オンラインの場合は何もしないか、ランダム送信などが考えられるがここではランダム）
-        if(this.mode.includes('online') && this.myHand) return; // 既に選択済みなら何もしない
+        if(this.mode.includes('online') && this.myHand) return;
 
         const hands = ['r', 's', 'p'];
         const randomHand = hands[Math.floor(Math.random() * 3)];
-        Shared.UI.msg("TIME OVER (AUTO)", "#aaa");
+        
+        // 誰のターンで時間切れになったか判定
+        const pName = (this.mode === 'local') ? (this.p1Hand ? "P2" : "P1") : "YOU";
+        Shared.UI.msg(`${pName} TIME OVER (AUTO)`, "#aaa");
+        
         this.play(randomHand);
     },
 
@@ -326,8 +326,10 @@ window.GraphGame = {
     splitHistory(p) {
         if (p.history.length < 2) return;
         
-        // ランダムな区間を選択
-        const idx = Math.floor(Math.random() * (p.history.length - 1));
+        // ★修正: オンライン同期ズレを防ぐため、Math.random()を排除。ターン数に基づいた固定の区間・歪みを使用する。
+        const pseudoRand = (this.turn * 13.7) % 1; // ターン由来の疑似乱数
+        const idx = Math.floor(pseudoRand * (p.history.length - 1));
+        
         const A = p.history[idx];
         const B = p.history[idx + 1];
 
@@ -338,10 +340,14 @@ window.GraphGame = {
             z: (A.z + B.z) / 2
         };
 
-        // 少しノイズを乗せて歪ませる（これにより面積計算が狂い、戦略が崩れるペナルティ）
-        mid.x += (Math.random() - 0.5) * 5;
-        mid.y += (Math.random() - 0.5) * 5;
-        mid.z += (Math.random() - 0.5) * 5;
+        // ペナルティのノイズ（決定的な計算）
+        const noiseX = Math.sin(this.turn) * 3;
+        const noiseY = Math.cos(this.turn) * 3;
+        const noiseZ = Math.sin(this.turn * 2) * 3;
+
+        mid.x += noiseX;
+        mid.y += noiseY;
+        mid.z += noiseZ;
 
         // 履歴に挿入
         p.history.splice(idx + 1, 0, mid);
@@ -445,12 +451,36 @@ updateHUD() {
             h2.style.borderBottom = "4px solid var(--accent)";
             h2.style.background = "rgba(255, 0, 85, 0.1)";
         }
+
+        // スマホ対面（ローカル）用のじゃんけんUI位置反転
+        const rpsUI = document.getElementById('ui-rps');
+        if (rpsUI && this.mode === 'local') {
+            if (activePlayer === 'p2') {
+                rpsUI.style.top = '60px';
+                rpsUI.style.bottom = 'auto';
+                rpsUI.style.transform = 'rotate(180deg)';
+            } else {
+                rpsUI.style.top = 'auto';
+                rpsUI.style.bottom = '40px';
+                rpsUI.style.transform = 'none';
+            }
+        }
     },
 
     animate() {
         if (!this.isPlaying) return;
         // 安全装置: レンダラーが無ければループを止める
         if (!this.renderer) return;
+
+        // リサイズ対応（コンテナの描画サイズとキャンバス解像度のズレを検知）
+        const canvas = this.renderer.domElement;
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        if (canvas.width !== width || canvas.height !== height) {
+            this.renderer.setSize(width, height, false);
+            this.camera.aspect = width / height;
+            this.camera.updateProjectionMatrix();
+        }
 
         this.animationId = requestAnimationFrame(() => this.animate());
         if (this.controls) this.controls.update();
@@ -483,7 +513,12 @@ updateHUD() {
         
         // UI非表示
         const rpsUI = document.getElementById('ui-rps');
-        if(rpsUI) rpsUI.style.display = 'none';
+        if(rpsUI) {
+            rpsUI.style.display = 'none';
+            rpsUI.style.top = 'auto';
+            rpsUI.style.bottom = '40px';
+            rpsUI.style.transform = 'none';
+        }
         const turnArea = document.getElementById('turn-display-area');
         if(turnArea) turnArea.style.display = 'none';
         const timerEl = document.getElementById('game-timer');
