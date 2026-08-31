@@ -17,6 +17,7 @@ window.GraphGame = {
     mode: null,
     role: 'p1',
     timerId: null,
+    initTimerId: null,
     timeLeft: 10,
     p1Hand: null, // ローカル対戦用の一時保存
     myHand: null, // オンライン用
@@ -66,10 +67,11 @@ window.GraphGame = {
         }
 
         // Three.jsとゲームの初期化
-        setTimeout(() => {
+        this.isPlaying = true;
+        this.initTimerId = setTimeout(() => {
+            if (!this.isPlaying) return; // 破棄された場合は起動しない
             this.setupThree();
             this.reset();
-            this.isPlaying = true;
             this.animate();
             this.startTimer(); // タイマースタート
         }, 100);
@@ -411,11 +413,9 @@ window.GraphGame = {
             for(let i=1; i<p.history.length; i++) {
                 const a = p.history[i-1];
                 const b = p.history[i];
-                // 三角形の面積 = |a x b| / 2 だが、スコアとしては2倍の値(平行四辺形面積)をそのまま使うなど調整
-                // ここでは簡易的に各成分の外積の絶対値和を10で割ってスコアとする
                 s += Math.abs(a.x*b.y - b.x*a.y) + Math.abs(a.y*b.z - b.y*a.z) + Math.abs(a.z*b.x - b.z*a.x);
             }
-            return (s / 10).toFixed(0);
+            return Math.floor(s / 10); // 数値型として返す
         };
         this.p1.score = calc(this.p1);
         this.p2.score = calc(this.p2);
@@ -490,6 +490,12 @@ updateHUD() {
     stop() {
         this.isPlaying = false;
         
+        // 初期化遅延タイマーの停止
+        if (this.initTimerId) {
+            clearTimeout(this.initTimerId);
+            this.initTimerId = null;
+        }
+
         // タイマー停止
         if (this.timerId) {
             clearInterval(this.timerId);
@@ -501,6 +507,9 @@ updateHUD() {
             cancelAnimationFrame(this.animationId);
             this.animationId = null;
         }
+
+        // 通信コールバック解放
+        if (Shared.Net) Shared.Net.onData = null;
 
         // Three.js 破棄
         if (this.renderer) {
@@ -531,9 +540,12 @@ updateHUD() {
             // 自分が入力済みなら解決へ
             if (this.myHand) this.resolve(this.myHand, this.oppHand);
         }
+        if (d.type === 'over') {
+            this.end(d.payload, false);
+        }
     },
 
-    end() {
+    end(remoteMsg = null, sendNet = true) {
         this.isPlaying = false;
         if(this.timerId) clearInterval(this.timerId);
         
@@ -546,8 +558,12 @@ updateHUD() {
         Shared.UI.show('screen-result');
         const s1 = Number(this.p1.score);
         const s2 = Number(this.p2.score);
-        const res = (s1 > s2) ? "P1 WIN!" : (s2 > s1) ? "P2 WIN!" : "DRAW";
+        const res = remoteMsg || ((s1 > s2) ? "P1 WIN!" : (s2 > s1) ? "P2 WIN!" : "DRAW");
         document.getElementById('res-title').innerText = res;
         document.getElementById('res-detail').innerText = `SCORE: ${s1} vs ${s2}`;
+
+        if (sendNet && this.mode.includes('online')) {
+            Shared.Net.send('over', res, true);
+        }
     }
 };

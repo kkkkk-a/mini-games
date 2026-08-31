@@ -29,15 +29,15 @@ if (mode === 'local') {
     document.getElementById('ui-dpad-p2').style.display = 'none';
 }
 
-        // 入力初期化 (P1:矢印, P2:WASD)
+        // 入力初期化 (P1:矢印/ボタン, P2:WASD/ボタン)
         Shared.Input.init({
             'ArrowUp': 'up', 'ArrowDown': 'down', 'ArrowLeft': 'left', 'ArrowRight': 'right',
             'KeyW': 'up2', 'KeyS': 'down2', 'KeyA': 'left2', 'KeyD': 'right2',
-            'up': 'up', 'down': 'down', 'left': 'left', 'right': 'right' // スマホボタン用
+            'up': 'up', 'down': 'down', 'left': 'left', 'right': 'right',
+            'up2': 'up2', 'down2': 'down2', 'left2': 'left2', 'right2': 'right2' // P2スマホボタン用追加
         });
 
         if (mode.includes('online')) {
-            // ★修正: 関数名を onNet に統一
             Shared.Net.onData = (d) => this.onNet(d);
         }
 
@@ -50,11 +50,11 @@ if (mode === 'local') {
         }
     },
     reset() {
-        this.p1.body = [{x:5, y:18}, {x:5, y:19}, {x:5, y:20}];
+        this.p1.body = [{x:5, y:16}, {x:5, y:17}, {x:5, y:18}];
         this.p1.dir = {x:0, y:-1}; this.p1.nextDir = {x:0, y:-1};
         this.p1.score = 0;
 
-        this.p2.body = [{x:14, y:1}, {x:14, y:0}, {x:14, y:-1}];
+        this.p2.body = [{x:14, y:3}, {x:14, y:2}, {x:14, y:1}];
         this.p2.dir = {x:0, y:1}; this.p2.nextDir = {x:0, y:1};
         this.p2.score = 0;
 
@@ -151,8 +151,11 @@ if (mode === 'local') {
             p.score += 100;
             this.timeLimit = Math.min(100, this.timeLimit + 15);
             Shared.Sound.preset('ok');
-            this.placeFood();
-            if (this.mode.includes('online')) Shared.Net.send('food', this.food);
+            // オンライン時はホストのみがエサの位置を決定して送信
+            if (this.mode === 'online-host' || !this.mode.includes('online')) {
+                this.placeFood();
+                if (this.mode === 'online-host') Shared.Net.send('food', this.food);
+            }
         } else {
             p.body.pop();
         }
@@ -202,7 +205,23 @@ if (mode === 'local') {
     },
 
     placeFood() {
-        this.food = { x: Math.floor(Math.random() * this.tileCount), y: Math.floor(Math.random() * this.tileCount) };
+        let valid = false;
+        let newFood = { x: 0, y: 0 };
+        let attempts = 0;
+        
+        while (!valid && attempts < 100) {
+            newFood = {
+                x: Math.floor(Math.random() * this.tileCount),
+                y: Math.floor(Math.random() * this.tileCount)
+            };
+            const onP1 = this.p1.body.some(s => s.x === newFood.x && s.y === newFood.y);
+            const onP2 = this.p2.body.some(s => s.x === newFood.x && s.y === newFood.y);
+            if (!onP1 && !onP2) {
+                valid = true;
+            }
+            attempts++;
+        }
+        this.food = newFood;
     },
 
     draw() {
@@ -248,7 +267,7 @@ if (mode === 'local') {
         bar.style.backgroundColor = (this.timeLimit < 30) ? '#ff0055' : '#00f2ff';
     },
 
-    gameOver(msg) {
+    gameOver(msg, sendNet = true) {
         this.isPlaying = false;
         clearTimeout(this.timerId);
         Shared.Sound.preset('dead');
@@ -261,7 +280,7 @@ if (mode === 'local') {
         document.getElementById('res-title').innerText = msg;
         document.getElementById('res-detail').innerText = `SCORE: ${this.p1.score} vs ${this.p2.score}`;
 
-        if (this.mode.includes('online')) Shared.Net.send('over', { msg: msg });
+        if (sendNet && this.mode.includes('online')) Shared.Net.send('over', { msg: msg }, true);
     },
 
     // ★修正: 関数名をonNetに
@@ -278,7 +297,7 @@ if (mode === 'local') {
         }
         if (data.type === 'food') this.food = data.payload;
         if (data.type === 'over') {
-            if (this.isPlaying) this.gameOver(data.payload.msg);
+            if (this.isPlaying) this.gameOver(data.payload.msg, false);
         }
     },
         stop() {
@@ -294,7 +313,12 @@ if (mode === 'local') {
         const bar = document.getElementById('snake-time-bar');
         if (bar && bar.parentElement) bar.parentElement.remove();
         
-        // 十字キー非表示
+        // 十字キー非表示 (P1 & P2)
         Shared.UI.toggleLayout('ui-dpad', false);
+        const p2Dpad = document.getElementById('ui-dpad-p2');
+        if (p2Dpad) p2Dpad.style.display = 'none';
+
+        // 通信コールバック解放
+        if (Shared.Net) Shared.Net.onData = null;
     },
 };

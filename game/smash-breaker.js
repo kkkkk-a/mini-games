@@ -8,6 +8,7 @@ window.SmashGame = {
     ball: { x:300, y:400, r:8, vx:0, vy:0, power:false },
     particles: [],
     isPlaying: false,
+    animId: null,
 
     init(mode) {
         this.mode = mode;
@@ -62,7 +63,7 @@ if (mode === 'local') {
         }
         this.draw();
         
-        requestAnimationFrame(() => this.loop());
+        this.animId = requestAnimationFrame(() => this.loop());
     },
 
     update() {
@@ -149,7 +150,7 @@ if (mode === 'local') {
     },
 
     updatePaddle(p, l, r, rotL, rotR, chg, tx) {
-        if(tx !== undefined && tx !== null && p === this.p1) p.x += (tx - p.x) * 0.3;
+        if(tx !== undefined && tx !== null) p.x += (tx - p.x) * 0.3;
         else if(l) p.x -= 9;
         else if(r) p.x += 9;
         p.x = Math.max(60, Math.min(540, p.x));
@@ -199,19 +200,19 @@ if (mode === 'local') {
                 this.spawnParticles(b.x, b.y, 20, '#ffd700');
                 Shared.Sound.preset('dead');
                 
-                // ★VFX: 強打時に画面を激しく揺らし、0.15秒時間を止め、フラッシュさせる
                 Shared.VFX.shake('hard');
                 Shared.VFX.flash();
                 Shared.VFX.hitStop(150); 
             } else {
                 b.power = false;
-                b.vy = Math.abs(b.vy) * forwardDir;
+                // パドルの反対方向へ確実に弾く（めり込み防止）
+                b.vy = forwardDir * Math.max(4, Math.abs(b.vy));
                 b.vx += (p.angle * 5) + (lx * 0.1);
-                if(Math.abs(b.vy) < 4) b.vy = forwardDir * 4;
                 this.spawnParticles(b.x, b.y, 5, p.color);
                 Shared.Sound.preset('hit');
             }
-            b.y = p.y + (forwardDir * 20);
+            // パドルの厚み分を完全に外側へ押し出す
+            b.y = p.y + (forwardDir * 25);
         }
     },
 
@@ -279,12 +280,27 @@ if (mode === 'local') {
         this.isPlaying = false;
         Shared.UI.show('screen-result');
         document.getElementById('res-title').innerText = m;
+        if (this.mode.includes('online')) {
+            Shared.Net.send('over', m, true);
+        }
     },
         stop() {
         this.isPlaying = false;
+        if (this.animId) {
+            cancelAnimationFrame(this.animId);
+            this.animId = null;
+        }
         // UIを非表示
         Shared.UI.toggleLayout('ui-smash', false);
-        // 残っているパーティクルを消去（次回の描画に残らないように）
+        const p2Smash = document.getElementById('ui-smash-p2');
+        if (p2Smash) p2Smash.style.display = 'none';
+        // 残っているパーティクルを消去
         this.particles = [];
+        // キャンバスのクリア
+        if (this.ctx) {
+            this.ctx.clearRect(0, 0, 600, 800);
+        }
+        // 通信コールバック解放
+        if (Shared.Net) Shared.Net.onData = null;
     }
 };

@@ -4,7 +4,7 @@
 window.LineGame = {
     board: Array(9).fill(null), moves: {p1:[], p2:[]}, hp: {p1:3, p2:3},
     turn: 'p1', timer: 15, timerId: null, isPlaying: false,
-    canvas: null, ctx: null,
+    canvas: null, ctx: null, animId: null,
 
     init(mode) {
         this.mode = mode;
@@ -85,10 +85,11 @@ window.LineGame = {
     },
 
     input(idx) {
-        if(this.mode.includes('online') && this.turn !== this.role) return;
-        if(this.board[idx]) return;
+        if (this.mode.includes('online') && this.turn !== this.role) return;
+        if (this.mode === 'npc' && this.turn !== 'p1') return; // CPUターン中の入力無効化
+        if (this.board[idx]) return;
 
-        if(this.mode.includes('online')) Shared.Net.send('move', idx);
+        if (this.mode.includes('online')) Shared.Net.send('move', idx);
         this.play(this.turn, idx);
     },
 
@@ -124,6 +125,19 @@ window.LineGame = {
             this.startTimer();
             this.updateStatus();
             this.draw();
+
+            // CPUのターン処理
+            if (this.mode === 'npc' && this.turn === 'p2' && this.isPlaying) {
+                setTimeout(() => {
+                    if (this.isPlaying && this.turn === 'p2') {
+                        const empty = this.board.map((v, i) => v === null ? i : -1).filter(i => i !== -1);
+                        if (empty.length > 0) {
+                            const choice = empty[Math.floor(Math.random() * empty.length)];
+                            this.play('p2', choice);
+                        }
+                    }
+                }, 600);
+            }
         }
     },
 
@@ -239,10 +253,11 @@ updateStatus() {
         // --- NEXT OUT の黄色い枠線 ---
         // 次に手番のプレイヤーの「一番古いコマ」を囲む
         const nextPlayer = this.turn;
-        if (this.moves[nextPlayer].length >= 3) {
+        if (this.moves[nextPlayer] && this.moves[nextPlayer].length >= 3) {
             const dyingIdx = this.moves[nextPlayer][0];
-            const dx = (dyingIdx % 3) * cellW;
-            const dy = Math.floor(dyingIdx / 3) * cellH;
+            if (dyingIdx !== undefined && dyingIdx !== null) {
+                const dx = (dyingIdx % 3) * cellW;
+                const dy = Math.floor(dyingIdx / 3) * cellH;
             
             // 枠線
             ctx.strokeStyle = '#ffff00';
@@ -260,9 +275,10 @@ updateStatus() {
             ctx.fillRect(dx + 10, textY - 15, cellW - 20, 24);
 
             // 文字（黄色）
-            ctx.fillStyle = '#ffff00';
-            ctx.shadowBlur = 0; // 文字はクッキリさせる
-            ctx.fillText("NEXT OUT", dx + cellW/2, textY);
+                ctx.fillStyle = '#ffff00';
+                ctx.shadowBlur = 0; // 文字はクッキリさせる
+                ctx.fillText("NEXT OUT", dx + cellW/2, textY);
+            }
         }
     },
 
@@ -271,16 +287,23 @@ updateStatus() {
         if(d.type==='over') this.end(d.payload);
     },
 
-    end() {
+    end(remoteWinner = null) {
         this.isPlaying = false;
         clearInterval(this.timerId);
         Shared.UI.show('screen-result');
-        const winner = this.hp.p2<=0 ? 'P1' : 'P2';
-        document.getElementById('res-title').innerText = winner + " WIN!";
+        const winner = remoteWinner || (this.hp.p2 <= 0 ? 'P1 WIN!' : 'P2 WIN!');
+        document.getElementById('res-title').innerText = winner;
         document.getElementById('res-detail').innerText = "";
+        if (!remoteWinner && this.mode.includes('online')) {
+            Shared.Net.send('over', winner, true);
+        }
     },
         stop() {
         this.isPlaying = false;
+        if (this.animId) {
+            cancelAnimationFrame(this.animId);
+            this.animId = null;
+        }
         // タイマー停止
         if (this.timerId) {
             clearInterval(this.timerId);
@@ -290,14 +313,16 @@ updateStatus() {
         const el = document.getElementById('game-timer');
         if(el) el.style.display = 'none';
         
-        // 盤面クリア（見た目だけリセットしておく）
+        // 盤面クリア
         if(this.ctx && this.canvas) {
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         }
+        // 通信コールバック解放
+        if (Shared.Net) Shared.Net.onData = null;
     },
     updateVisuals() {
-    if (!this.isPlaying) return;
-    this.draw();
-    requestAnimationFrame(() => this.updateVisuals());
-}
+        if (!this.isPlaying) return;
+        this.draw();
+        this.animId = requestAnimationFrame(() => this.updateVisuals());
+    }
 };

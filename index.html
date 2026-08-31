@@ -22,8 +22,6 @@
     <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;800&family=Orbitron:wght@700&family=Roboto+Mono:wght@500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="common/shared.css">
 </head>
-<!-- index.html の該当箇所を修正・追記 -->
-
 <body>
     <!-- 背景・HUBボタン（そのまま） -->
     <div class="bg-grid"></div>
@@ -167,8 +165,8 @@
     </div>
 
     <!-- 6. ヘルプ画面（新規追加） -->
-    <div id="screen-help" class="screen modal" style="z-index: 600;">
-        <div class="panel-glass" style="max-width:500px; text-align:left;">
+    <div id="screen-help" class="screen modal" style="z-index: 600;" onclick="if(event.target === this) Core.closeHelp();">
+        <div class="panel-glass" style="max-width:500px; text-align:left;" onclick="event.stopPropagation();">
             <h2 id="help-title" style="text-align:center; color:var(--primary);">HELP</h2>
             <div id="help-content" style="white-space: pre-wrap; line-height:1.6; font-size:0.9rem; max-height:60vh; overflow-y:auto; margin-bottom:20px;"></div>
             <div style="text-align:center;">
@@ -223,8 +221,8 @@ closeHelp() {
     const el = document.getElementById('screen-help');
     el.classList.remove('active');
     el.style.display = 'none';
-    // セットアップ画面を確実に再表示
-    document.getElementById('screen-setup').style.display = 'flex';
+    // インラインスタイルではなくUIマネージャー経由で表示
+    Shared.UI.show('screen-setup');
 },
 
 start(mode) {
@@ -264,6 +262,8 @@ start(mode) {
 
         // ゲーム中断・終了処理 (Back / Menuボタン用)
         quitGame() {
+            Shared.isIntentionalQuit = true; // 意図的切断フラグをセット
+
             const gameMap = {
                 'smash': SmashGame, 'graph': GraphGame, 
                 'line': LineGame, 'calc': CalcGame, 'snake': SnakeGame
@@ -282,14 +282,39 @@ start(mode) {
             document.getElementById('turn-display-area').style.display = 'none';
             document.getElementById('game-guide').style.display = 'none';
 
-            // 通信切断
+            // カメラ停止
+            if (Shared.Net.scanner) {
+                try {
+                    Shared.Net.scanner.clear();
+                } catch(e) {}
+                Shared.Net.scanner = null;
+                const camWrap = document.getElementById('cam-wrapper');
+                if (camWrap) camWrap.style.display = 'none';
+            }
+
+            // 通信切断・Peer破棄
             if (Shared.Net.conn) {
                 Shared.Net.conn.close();
                 Shared.Net.conn = null;
             }
+            if (Shared.Net.peer) {
+                Shared.Net.peer.destroy();
+                Shared.Net.peer = null;
+            }
 
-            // モード選択画面に戻る (タイトルではなくセットアップ画面)
+            // オンライン待機画面UIを初期状態にリセット
+            const initUi = document.getElementById('net-init');
+            const hostUi = document.getElementById('net-host-ui');
+            const guestUi = document.getElementById('net-guest-ui');
+            if (initUi) initUi.style.display = 'flex';
+            if (hostUi) hostUi.style.display = 'none';
+            if (guestUi) guestUi.style.display = 'none';
+
+            // モード選択画面に戻る
             Shared.UI.show('screen-setup');
+            
+            // 次回対戦のためにフラグを戻す
+            setTimeout(() => { Shared.isIntentionalQuit = false; }, 500);
         },
         // ネットワーク接続確立時のコールバック（システム共通）
         onNetConnect() {

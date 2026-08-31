@@ -11,29 +11,7 @@ document.addEventListener('touchmove', function(e) {
 }, { passive: false });
 
 window.Shared = {
-        stop() {
-        this.isPlaying = false;
-        
-        // アニメーションループ停止
-        if (this.animationId) {
-            cancelAnimationFrame(this.animationId);
-            this.animationId = null;
-        }
-
-        // Three.jsのリソース解放 (メモリリーク防止)
-        if (this.renderer) {
-            this.renderer.dispose();
-            // DOMからキャンバスを削除しないと、次にinitしたときにgetContextエラーになる場合があるため
-            // init()側で「既存キャンバス削除」処理が入っていればOKですが、念のためここでも掃除可能です
-        }
-        
-        // UI非表示
-        const rpsUI = document.getElementById('ui-rps');
-        if(rpsUI) rpsUI.style.display = 'none';
-
-        const turnArea = document.getElementById('turn-display-area');
-        if(turnArea) turnArea.style.display = 'none';
-    },
+    isIntentionalQuit: false, // 意図的な終了かどうかのフラグ
     // --- 1. UI管理システム ---
     UI: {
         // 画面を切り替える（ID指定）
@@ -254,11 +232,16 @@ window.Shared = {
                 const updatePos = (e) => {
                     if (e.buttons > 0 || e.pointerType === 'touch') {
                         const rect = cvs.getBoundingClientRect();
+                        if (rect.width === 0 || rect.height === 0) return; // 0除算防止
                         const scaleX = cvs.width / rect.width;
                         const scaleY = cvs.height / rect.height;
+                        const posX = (e.clientX - rect.left) * scaleX;
+                        const posY = (e.clientY - rect.top) * scaleY;
+                        this.state.touchX = posX;
+                        this.state.touchY = posY;
                         this.state.activeTouches.set(e.pointerId, {
-                            x: (e.clientX - rect.left) * scaleX,
-                            y: (e.clientY - rect.top) * scaleY
+                            x: posX,
+                            y: posY
                         });
                     }
                 };
@@ -274,6 +257,10 @@ window.Shared = {
                 };
                 const removePos = (e) => {
                     this.state.activeTouches.delete(e.pointerId);
+                    if (this.state.activeTouches.size === 0) {
+                        this.state.touchX = null;
+                        this.state.touchY = null;
+                    }
                 };
                 cvs.onpointerup = removePos;
                 cvs.onpointercancel = removePos;
@@ -297,6 +284,10 @@ window.Shared = {
 
         // ホストとして開始
         host() {
+            if (this.peer) {
+                this.peer.destroy();
+                this.peer = null;
+            }
             this.role = 'host';
             Shared.UI.show('screen-net');
             // 画面パーツの切り替え
@@ -360,6 +351,10 @@ window.Shared = {
 
         // 接続処理
         join(id) {
+            if (this.peer) {
+                this.peer.destroy();
+                this.peer = null;
+            }
             this.role = 'guest';
             Shared.Sound.init();
             
@@ -370,6 +365,10 @@ window.Shared = {
             });
             this.peer.on('error', err => {
                 alert("接続失敗: IDを確認してください");
+                if (this.peer) {
+                    this.peer.destroy();
+                    this.peer = null;
+                }
             });
         },
 
@@ -387,8 +386,11 @@ window.Shared = {
             });
             
             this.conn.on('close', () => {
-                alert("対戦相手が切断しました");
-                location.reload();
+                // 自らメニューに戻った（quitGame）時はリロードしない
+                if (!Shared.isIntentionalQuit) {
+                    alert("対戦相手が切断しました");
+                    location.reload();
+                }
             });
         },
 
