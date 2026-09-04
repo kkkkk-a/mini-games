@@ -96,6 +96,17 @@ if (mode === 'local') {
         this.moveSnake(this.p1, h1);
         this.moveSnake(this.p2, h2);
 
+        // オンラインホストは全スネークの位置情報を送信して同期ズレを修復
+        if (this.mode === 'online-host') {
+            Shared.Net.send('sync', {
+                p1Body: this.p1.body,
+                p2Body: this.p2.body,
+                p1Score: this.p1.score,
+                p2Score: this.p2.score,
+                timeLimit: this.timeLimit
+            });
+        }
+
         this.timeLimit -= 0.2;
         if (this.timeLimit <= 0) return this.gameOver('TIME OVER');
 
@@ -107,15 +118,16 @@ if (mode === 'local') {
         if (this.isMyControl('p1')) {
             const s = Shared.Input.state;
             let dx = 0, dy = 0;
-            if (s.up)    { dx=0; dy=-1; }
-            if (s.down)  { dx=0; dy=1; }
-            if (s.left)  { dx=-1; dy=0; }
-            if (s.right) { dx=1; dy=0; }
+            if (s.up)    { dx = 0; dy = -1; }
+            if (s.down)  { dx = 0; dy = 1; }
+            if (s.left)  { dx = -1; dy = 0; }
+            if (s.right) { dx = 1; dy = 0; }
 
             if (dx !== 0 || dy !== 0) {
-                if (this.p1.dir.x !== -dx && this.p1.dir.y !== -dy) {
-                    this.p1.nextDir = {x:dx, y:dy};
-                    // ★修正: 送信タイプを input に変更
+                // 現在の進行方向だけでなく、予約された向きに対しても逆走をブロック
+                const cur = this.p1.dir;
+                if ((dx !== -cur.x || dx === 0) && (dy !== -cur.y || dy === 0)) {
+                    this.p1.nextDir = { x: dx, y: dy };
                     if (this.mode.includes('online')) Shared.Net.send('input', this.p1.nextDir);
                 }
             }
@@ -124,13 +136,16 @@ if (mode === 'local') {
         if (this.mode === 'local') {
             const s = Shared.Input.state;
             let dx = 0, dy = 0;
-            if (s.up2)    { dx=0; dy=-1; }
-            if (s.down2)  { dx=0; dy=1; }
-            if (s.left2)  { dx=-1; dy=0; }
-            if (s.right2) { dx=1; dy=0; }
+            if (s.up2)    { dx = 0; dy = -1; }
+            if (s.down2)  { dx = 0; dy = 1; }
+            if (s.left2)  { dx = -1; dy = 0; }
+            if (s.right2) { dx = 1; dy = 0; }
 
-            if ((dx !== 0 || dy !== 0) && (this.p2.dir.x !== -dx && this.p2.dir.y !== -dy)) {
-                this.p2.nextDir = {x:dx, y:dy};
+            if (dx !== 0 || dy !== 0) {
+                const cur = this.p2.dir;
+                if ((dx !== -cur.x || dx === 0) && (dy !== -cur.y || dy === 0)) {
+                    this.p2.nextDir = { x: dx, y: dy };
+                }
             }
         }
     },
@@ -171,36 +186,32 @@ if (mode === 'local') {
 
     aiMove(p) {
         const head = p.body[0];
-        
-        // 第一候補: エサに向かう
-        let targetDir = p.dir;
-        if (this.food.x > head.x && p.dir.x !== -1) targetDir = {x:1, y:0};
-        else if (this.food.x < head.x && p.dir.x !== 1) targetDir = {x:-1, y:0};
-        else if (this.food.y > head.y && p.dir.y !== -1) targetDir = {x:0, y:1};
-        else if (this.food.y < head.y && p.dir.y !== 1) targetDir = {x:0, y:-1};
-        
-        p.nextDir = targetDir;
 
-        // ★修正: 進んだ先が死ぬ場合（壁か体）、別の方向に逃げる（簡易回避AI）
-        const nextX = head.x + p.nextDir.x;
-        const nextY = head.y + p.nextDir.y;
-        
-        // 危険判定ヘルパー
         const isDanger = (x, y) => {
             if (x < 0 || x >= this.tileCount || y < 0 || y >= this.tileCount) return true;
             const hit = (body) => body.some(seg => seg.x === x && seg.y === y);
             return hit(this.p1.body) || hit(this.p2.body);
         };
 
-        if (isDanger(nextX, nextY)) {
-            // 4方向の中で安全なものを探す
-            const safeDirs =[
-                {x:1, y:0}, {x:-1, y:0}, {x:0, y:1}, {x:0, y:-1}
-            ].filter(d => !isDanger(head.x + d.x, head.y + d.y) && (d.x !== -p.dir.x || d.y !== -p.dir.y));
-            
-            if (safeDirs.length > 0) {
-                p.nextDir = safeDirs[Math.floor(Math.random() * safeDirs.length)];
-            }
+        // 逆走以外の移動可能候補（3方向）
+        const candidateDirs = [
+            { x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }
+        ].filter(d => !(d.x === -p.dir.x && d.y === -p.dir.y));
+
+        // 安全な方向のみ抽出
+        const safeDirs = candidateDirs.filter(d => !isDanger(head.x + d.x, head.y + d.y));
+
+        if (safeDirs.length > 0) {
+            // エサへのマンハッタン距離が最も短くなる安全な方向を選択
+            safeDirs.sort((a, b) => {
+                const distA = Math.abs((head.x + a.x) - this.food.x) + Math.abs((head.y + a.y) - this.food.y);
+                const distB = Math.abs((head.x + b.x) - this.food.x) + Math.abs((head.y + b.y) - this.food.y);
+                return distA - distB;
+            });
+            p.nextDir = safeDirs[0];
+        } else {
+            // 全て危険なら現在の向きを維持
+            p.nextDir = p.dir;
         }
     },
 
@@ -290,10 +301,17 @@ if (mode === 'local') {
             this.isPlaying = true;
             this.loop();
         }
-        // ★修正: 受信タイプ input に対応
         if (data.type === 'input') {
             const target = (this.role === 'p1') ? this.p2 : this.p1;
             target.nextDir = data.payload;
+        }
+        if (data.type === 'sync' && this.role === 'p2') {
+            // ゲスト側でホストの座標・スコア・時間を正として同期
+            this.p1.body = data.payload.p1Body;
+            this.p2.body = data.payload.p2Body;
+            this.p1.score = data.payload.p1Score;
+            this.p2.score = data.payload.p2Score;
+            this.timeLimit = data.payload.timeLimit;
         }
         if (data.type === 'food') this.food = data.payload;
         if (data.type === 'over') {

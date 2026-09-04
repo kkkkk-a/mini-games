@@ -119,6 +119,13 @@ window.GraphGame = {
         this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
+        this.controls.maxDistance = 150;
+        this.controls.minDistance = 10;
+        // UIボタンタップ中の誤作動防止
+        this.controls.touches = {
+            ONE: THREE.TOUCH.ROTATE,
+            TWO: THREE.TOUCH.DOLLY_PAN
+        };
 
         // ライト
         this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
@@ -379,26 +386,33 @@ window.GraphGame = {
             const vertices = [];
             const origin = new THREE.Vector3(0, 0, 0);
             for (let i = 1; i < points.length; i++) {
-                // 原点、点A、点B で三角形を作る
+                // 表裏両面を描画するため両順序で頂点配列を構築
                 vertices.push(origin.x, origin.y, origin.z);
                 vertices.push(points[i-1].x, points[i-1].y, points[i-1].z);
                 vertices.push(points[i].x, points[i].y, points[i].z);
+
+                vertices.push(origin.x, origin.y, origin.z);
+                vertices.push(points[i].x, points[i].y, points[i].z);
+                vertices.push(points[i-1].x, points[i-1].y, points[i-1].z);
             }
             const shapeGeo = new THREE.BufferGeometry();
             shapeGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            shapeGeo.computeVertexNormals();
             
-            // 半透明で描画して重なりを表現
+            // 半透明でネオン発光風に描画
             const shapeMat = new THREE.MeshBasicMaterial({ 
                 color: p.color, 
                 side: THREE.DoubleSide, 
                 transparent: true, 
-                opacity: 0.2,
-                depthWrite: false // 透明描画順序対策
+                opacity: 0.35,
+                depthWrite: false
             });
             this.pathGroup.add(new THREE.Mesh(shapeGeo, shapeMat));
 
-            // 現在地の球体
-            const head = new THREE.Mesh(new THREE.SphereGeometry(1.5, 8, 8), new THREE.MeshBasicMaterial({ color: p.color }));
+            // 現在地の球体（発光感を強調）
+            const headGeo = new THREE.SphereGeometry(2.0, 16, 16);
+            const headMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const head = new THREE.Mesh(headGeo, headMat);
             head.position.copy(p.pos);
             this.pathGroup.add(head);
         });

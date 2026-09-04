@@ -306,18 +306,32 @@ window.CalcGame = {
         } else if (this.mode === 'npc' && atk === 'p2') {
             Shared.UI.msg("CPUが計算中...", "#ff5555");
             setTimeout(() => {
-                if (!this.isPlaying) return; // 中断時対策
-                // NPCロジック (成功率50%)
-                const success = Math.random() < 0.5;
-                if(success) {
-                    Shared.UI.msg("BREAK SUCCESS!", "#ffd700");
-                    Shared.Sound.preset('dead'); // P1視点ではダメージ音
-                    this.endRoundBreakSuccess(); 
+                if (!this.isPlaying) return;
+
+                const base = this.p2.select;
+                const tgt = this.p1.select;
+                const hand = [...this.p2.hand];
+                // 場のカードは手札コスト計算から除外
+                const idx = hand.indexOf(base);
+                if (idx > -1) hand.splice(idx, 1);
+
+                // 計算式を探索
+                const solution = this.solveTarget(base, tgt, hand);
+
+                if (solution) {
+                    this.buffer = solution;
+                    Shared.UI.msg(`CPU: ${solution.join(' ')} = ${tgt}`, "#ffd700");
+                    Shared.Sound.preset('dead');
+                    Shared.VFX.shake('light');
+                    Shared.VFX.flash();
+                    setTimeout(() => {
+                        if (this.isPlaying) this.endRoundBreakSuccess();
+                    }, 1200);
                 } else {
-                    Shared.UI.msg("GUARDED!", "#aaa");
+                    Shared.UI.msg("CPUはパスしました", "#aaa");
                     this.pass();
                 }
-            }, 2000);
+            }, 1500);
         } else {
             Shared.UI.msg("相手の計算を待っています...", "#ff5555");
         }
@@ -371,8 +385,15 @@ window.CalcGame = {
         });
 
         document.getElementById('c-clear').onclick = () => { 
-            this.buffer = [ (this.attacker==='p1' ? this.p1.select : this.p2.select) ]; 
+            const baseCard = (this.attacker === 'p1' ? this.p1.select : this.p2.select);
+            // 2文字以上あれば末尾を1つ削除、1文字だけなら維持
+            if (this.buffer.length > 1) {
+                this.buffer.pop();
+            } else {
+                this.buffer = [baseCard];
+            }
             this.renderCalcButtons(); 
+            Shared.Sound.preset('cancel');
         };
         document.getElementById('c-pass').onclick = () => this.pass();
         document.getElementById('c-go').onclick = () => this.submit();
@@ -503,6 +524,44 @@ window.CalcGame = {
         if (d.type === 'over') {
             this.end(d.payload, false);
         }
+    },
+
+    // CPU用：手札からターゲットを作る計算式を総当たり探索する
+    solveTarget(base, target, hand) {
+        const ops = ['+', '-', '*', '/'];
+
+        // パターン1: base (op) num = target
+        for (const op of ops) {
+            for (let i = 0; i < hand.length; i++) {
+                const exp = `${base}${op}${hand[i]}`;
+                try {
+                    const res = Function('"use strict";return (' + exp + ')')();
+                    if (Math.abs(res - target) < 0.0001) {
+                        return [base, op, hand[i]];
+                    }
+                } catch(e) {}
+            }
+        }
+
+        // パターン2: base (op1) num1 (op2) num2 = target (2枚消費)
+        for (let i = 0; i < hand.length; i++) {
+            for (let j = 0; j < hand.length; j++) {
+                if (i === j) continue;
+                for (const op1 of ops) {
+                    for (const op2 of ops) {
+                        const exp = `${base}${op1}${hand[i]}${op2}${hand[j]}`;
+                        try {
+                            const res = Function('"use strict";return (' + exp + ')')();
+                            if (Math.abs(res - target) < 0.0001) {
+                                return [base, op1, hand[i], op2, hand[j]];
+                            }
+                        } catch(e) {}
+                    }
+                }
+            }
+        }
+
+        return null; // 見つからなければパス
     },
 
     startTimer(sec, cb) {

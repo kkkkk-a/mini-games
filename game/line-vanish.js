@@ -28,13 +28,20 @@ window.LineGame = {
         this.startTimer();
 
         this.canvas.onpointerdown = (e) => {
-            if(!this.isPlaying) return;
+            if (!this.isPlaying) return;
             e.preventDefault();
             const r = this.canvas.getBoundingClientRect();
-            const x = Math.floor((e.clientX - r.left) / (r.width / 3));
-            const y = Math.floor((e.clientY - r.top) / (r.height / 3));
-            const idx = y * 3 + x;
-            if(x>=0 && x<3 && y>=0 && y<3) this.input(idx);
+            if (r.width === 0 || r.height === 0) return;
+            
+            const px = (e.clientX - r.left) / r.width;
+            const py = (e.clientY - r.top) / r.height;
+            const x = Math.floor(px * 3);
+            const y = Math.floor(py * 3);
+            
+            if (x >= 0 && x < 3 && y >= 0 && y < 3) {
+                const idx = y * 3 + x;
+                this.input(idx);
+            }
         };
 
         if(mode.includes('online')) {
@@ -130,15 +137,59 @@ window.LineGame = {
             if (this.mode === 'npc' && this.turn === 'p2' && this.isPlaying) {
                 setTimeout(() => {
                     if (this.isPlaying && this.turn === 'p2') {
-                        const empty = this.board.map((v, i) => v === null ? i : -1).filter(i => i !== -1);
-                        if (empty.length > 0) {
-                            const choice = empty[Math.floor(Math.random() * empty.length)];
+                        const choice = this.getAIMove();
+                        if (choice !== null && choice !== undefined) {
                             this.play('p2', choice);
                         }
                     }
                 }, 600);
             }
         }
+    },
+
+    getAIMove() {
+        const lines = [
+            [0, 1, 2], [3, 4, 5], [6, 7, 8],
+            [0, 3, 6], [1, 4, 7], [2, 5, 8],
+            [0, 4, 8], [2, 4, 6]
+        ];
+
+        // 仮想ボードでラインが揃うかをテストする関数
+        const simulateWin = (player, cell) => {
+            const nextMoves = [...this.moves[player]];
+            const tempBoard = [...this.board];
+            if (nextMoves.length >= 3) {
+                const old = nextMoves.shift();
+                tempBoard[old] = null;
+            }
+            tempBoard[cell] = player;
+            return lines.some(l => l.every(i => tempBoard[i] === player));
+        };
+
+        const empty = this.board.map((v, i) => v === null ? i : -1).filter(i => i !== -1);
+        if (empty.length === 0) return null;
+
+        // 1. 自分がビンゴ（勝利）できるマスがあれば最優先
+        for (const idx of empty) {
+            if (simulateWin('p2', idx)) return idx;
+        }
+
+        // 2. 相手（P1）が次で揃いそうな場所をブロック
+        for (const idx of empty) {
+            if (simulateWin('p1', idx)) return idx;
+        }
+
+        // 3. 中央 (マス4) を優先
+        if (empty.includes(4)) return 4;
+
+        // 4. 四隅 (0, 2, 6, 8) を優先
+        const corners = [0, 2, 6, 8].filter(c => empty.includes(c));
+        if (corners.length > 0) {
+            return corners[Math.floor(Math.random() * corners.length)];
+        }
+
+        // 5. 残りの空きマスからランダム
+        return empty[Math.floor(Math.random() * empty.length)];
     },
 
     countWinLines(p) {
